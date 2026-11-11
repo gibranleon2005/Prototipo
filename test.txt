@@ -1,0 +1,19 @@
+import torch, base64, io
+from PIL import Image
+from transformers import Qwen2VLForConditionalGeneration, AutoProcessor
+
+model_id = "Qwen/Qwen2-VL-2B-Instruct"
+model = Qwen2VLForConditionalGeneration.from_pretrained(
+    model_id, torch_dtype=torch.float16, device_map="auto")
+processor = AutoProcessor.from_pretrained(
+    model_id, min_pixels=256*28*28, max_pixels=640*28*28)
+
+def generate(img, prompt):
+    messages = [{"role": "user", "content": [
+        {"type": "image"}, {"type": "text", "text": prompt}]}]
+    text = processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True)
+    inputs = processor(text=[text], images=[img], return_tensors="pt").to(model.device)
+    out = model.generate(**inputs, max_new_tokens=250, do_sample=False)
+    out = out[:, inputs.input_ids.shape[1]:]
+    return processor.batch_decode(out, skip_special_tokens=True)[0]

@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useObjects } from '../context/ObjectsContext'
 import { useAuth } from '../context/AuthContext'
 import { CATEGORIAS, ETIQUETAS, TIPOS_OBJETO } from '../data/constants'
+import { describeImage } from '../services/describeImage'
 
 function UploadObject() {
   const { addObject } = useObjects()
@@ -17,6 +18,9 @@ function UploadObject() {
   const [tipo, setTipo] = useState('')
   const [ubicacion, setUbicacion] = useState('')
   const [error, setError] = useState('')
+  const [analizando, setAnalizando] = useState(false)
+  const [avisoIA, setAvisoIA] = useState('')
+  const abortRef = useRef(null)
 
   // Si nadie ha iniciado sesión, no se puede publicar: se pide iniciar sesión primero.
   if (!usuarioActual) {
@@ -31,15 +35,38 @@ function UploadObject() {
     )
   }
 
-  function handleFileChange(e) {
+  async function handleFileChange(e) {
     const file = e.target.files?.[0]
+    abortRef.current?.abort() // cancela un análisis anterior si cambió la foto
+    setAvisoIA('')
+
     if (!file) {
       setPreview(null)
+      setAnalizando(false)
       return
     }
+
     const reader = new FileReader()
     reader.onload = () => setPreview(reader.result)
     reader.readAsDataURL(file)
+
+    // Autocompletado con IA: solo llena campos que el usuario aún no escribió.
+    const controller = new AbortController()
+    abortRef.current = controller
+    setAnalizando(true)
+    try {
+      const r = await describeImage(file, controller.signal)
+      setTitulo((prev) => prev || r.titulo)
+      setDescripcion((prev) => prev || r.descripcion)
+      setCategoria((prev) => prev || (CATEGORIAS.includes(r.categoria) ? r.categoria : ''))
+      setAvisoIA('Sugerido por IA: revisa y corrige lo que haga falta.')
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setAvisoIA('No pudimos describir la foto automáticamente. Puedes llenarlo a mano.')
+      }
+    } finally {
+      if (abortRef.current === controller) setAnalizando(false)
+    }
   }
 
   function handleSubmit(e) {
@@ -132,6 +159,9 @@ function UploadObject() {
         {preview && (
           <img src={preview} alt="Vista previa" className="upload-preview" />
         )}
+
+        {analizando && <p className="form-hint">Analizando la foto con IA…</p>}
+        {!analizando && avisoIA && <p className="form-hint">{avisoIA}</p>}
 
         <label htmlFor="categoria">Categoría</label>
         <select
